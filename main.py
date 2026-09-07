@@ -15,7 +15,7 @@ from telegram.ext import (
     filters,
 )
 
-# --- 1. سيرفر وهمي لإرضاء Render وتشغيل Web Service مجاناً ---
+# --- 1. سيرفر وهمي لإرضاء Render وتفعيل Web Service مجاناً ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
   def do_GET(self):
@@ -30,13 +30,11 @@ def run_dummy_server():
   server.serve_forever()
 
 
-# تشغيل السيرفر في الخلفية
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-
-# --- 2. البيانات والمعلومات الأساسية ---
+# --- 2. البيانات الأساسية والإعدادات ---
 BOT_TOKEN = "8712058483:AAEajZ57ooCtTTCibNuuN2zOSfdy3u969rE"
-ADMIN_CHAT_ID = 8556501768
+ADMIN_CHAT_ID = 8556501768  # ايديك الخاص كآدمن
 
 BINANCE_PAY_ID = "1006208970"
 USDT_WALLET = "0x409239a2a633f0627366f701c4ee3c2d5a9dac2a"
@@ -48,14 +46,25 @@ BINANCE_SECRET_KEY = (
     "wahitoge75wxgfss40o7p2hapkgwupelca65n3snr4qdou4rnep4xlaprlhzb8ab"
 )
 
-PRODUCTS_PRICES = {"APKMOD": 5.0, "IOS": 10.0, "ROOT": 15.0}
+# قائمة المنتجات القابلة للتعديل ديناميكياً من الآدمن
+products_db = {
+    "APKMOD": {"name": "تطبيقات APKMOD", "price": 5.0},
+    "IOS": {"name": "تطبيقات IOS", "price": 10.0},
+    "ROOT": {"name": "خدمات ROOT", "price": 15.0},
+}
+
+# رسائل الترحيب القابلة للتعديل
+welcome_messages = {
+    "ar": "👋 **أهلاً بك في QAIS STORE!**\n⭐ متجر الخدمات والتطبيقات المعدلة الممتازة\n⚡ تحقق وإيداع آلي 24/7",
+    "en": "👋 **Welcome to QAIS STORE!**\n⭐ Premium Game Keys & Mod Tools\n⚡ Instant Verification 24/7",
+}
 
 user_balances = {}
 user_data = {}
 used_txids = set()
 
 
-# --- 3. وظائف التحقق من بايننس والقوائم ---
+# --- 3. الدعم الفني والربط مع بايننس ---
 def check_binance_deposit(tx_id):
   url = "https://api.binance.com/sapi/v1/capital/deposit/hisrec"
   timestamp = int(time.time() * 1000)
@@ -79,28 +88,24 @@ def check_binance_deposit(tx_id):
           return float(deposit.get("amount", 0))
     return None
   except Exception as e:
-    print(f"Error Binance API: {e}")
+    print(f"Binance API Error: {e}")
     return None
 
 
 def is_valid_amount(amount):
-  if amount == 1.0:
-    return True
-  if amount >= 5.0 and (amount % 5.0 == 0):
-    return True
-  return False
+  return amount == 1.0 or (amount >= 5.0 and amount % 5.0 == 0)
 
 
-def build_main_menu(lang, balance):
+def build_main_menu(lang, balance, user_id):
+  welcome_txt = welcome_messages.get(lang, welcome_messages["ar"])
+
   if lang == "en":
     text = (
-        "🤖 **─── QAIS Gaming Store ───**\n\n"
-        "👋 **Welcome to QAIS STORE!**\n\n"
-        "⭐ Premium Game Keys & Mod Tools\n"
-        "⚡ Instant Verification 24/7\n"
-        "💰 Balance: **${balance:.2f}**"
-    ).format(balance=balance)
-
+        f"🤖 **─── QAIS Gaming Store ───**\n\n"
+        f"{welcome_txt}\n\n"
+        f"🆔 Your ID: `{user_id}`\n"
+        f"💰 Balance: **${balance:.2f}**"
+    )
     keyboard = [
         [InlineKeyboardButton("💎 Shop Now", callback_data="store")],
         [
@@ -121,13 +126,11 @@ def build_main_menu(lang, balance):
     ]
   else:
     text = (
-        "🤖 **─── متجر قيس للخدمات ───**\n\n"
-        "👋 **أهلاً بك في QAIS STORE!**\n\n"
-        "⭐ مفاتيح ألعاب وتطبيقات معدلة ممتازة\n"
-        "⚡ تحقق وإيداع آلي 24/7\n"
-        "💰 رصيدك الحالي: **${balance:.2f}**"
-    ).format(balance=balance)
-
+        f"🤖 **─── متجر قيس للخدمات ───**\n\n"
+        f"{welcome_txt}\n\n"
+        f"🆔 معرّفك الخاص: `{user_id}`\n"
+        f"💰 رصيدك الحالي: **${balance:.2f}**"
+    )
     keyboard = [
         [InlineKeyboardButton("💎 الشراء الآن", callback_data="store")],
         [
@@ -150,7 +153,7 @@ def build_main_menu(lang, balance):
   return text, InlineKeyboardMarkup(keyboard)
 
 
-# --- 4. معالجة الأوامر والأزرار ---
+# --- 4. معالجة الأوامر الرئيسية والتفاعل ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
   user = update.effective_user
   user_id = user.id
@@ -158,18 +161,102 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if user_id not in user_balances:
     user_balances[user_id] = 0.0
 
-  if user_id not in user_data:
-    user_data[user_id] = {"lang": "ar"}
+  # سؤال المستخدم عن اللغة أولاً إذا كانت هذه زيارته الأولى
+  if user_id not in user_data or "lang" not in user_data[user_id]:
+    keyboard = [
+        [
+            InlineKeyboardButton("🇸🇦 العربية", callback_data="init_lang_ar"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="init_lang_en"),
+        ]
+    ]
+    await update.message.reply_text(
+        "👋 **مرحباً بك! اختر اللّغة للبدء / Welcome! Select your language to"
+        " start:**",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return
 
   lang = user_data[user_id].get("lang", "ar")
   balance = user_balances[user_id]
 
-  text, reply_markup = build_main_menu(lang, balance)
+  text, reply_markup = build_main_menu(lang, balance, user_id)
   await update.message.reply_text(
       text, parse_mode="Markdown", reply_markup=reply_markup
   )
 
 
+# --- 5. أوامر لوحة تحكم الآدمن ---
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  if update.effective_user.id != ADMIN_CHAT_ID:
+    return
+
+  msg = (
+      "👑 **لوحة تحكم الآدمن (قيس):**\n\n"
+      "🔹 **تعديل سعر منتج:**\n`/setprice [رمز_المنتج] [السعر_الجديد]`\nمثال:"
+      " `/setprice APKMOD 7.5`\n\n"
+      "🔹 **إضافة منتج جديد:**\n`/addproduct [الرمز] [الاسم] [السعر]`\nمثال:"
+      " `/addproduct VIP جواهر_فراير 10`\n\n"
+      "🔹 **تعديل الترحيب العربي:**\n`/setwelcome [النص]`\n\n"
+      "📦 **المنتجات الحالية:**\n"
+  )
+  for code, item in products_db.items():
+    msg += f"• `{code}`: {item['name']} - **${item['price']}**\n"
+
+  await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  if update.effective_user.id != ADMIN_CHAT_ID:
+    return
+  try:
+    code = context.args[0].upper()
+    new_price = float(context.args[1])
+    if code in products_db:
+      products_db[code]["price"] = new_price
+      await update.message.reply_text(
+          f"✅ تم تحديث سعر `{code}` إلى **${new_price:.2f}** بنجاح!"
+      )
+    else:
+      await update.message.reply_text("❌ هذا المنتج غير موجود!")
+  except Exception:
+    await update.message.reply_text(
+        "⚠️ الاستخدام الخاطئ! الصيغة الصحيحة:\n`/setprice APKMOD 8.0`",
+        parse_mode="Markdown",
+    )
+
+
+async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  if update.effective_user.id != ADMIN_CHAT_ID:
+    return
+  try:
+    code = context.args[0].upper()
+    name = context.args[1].replace("_", " ")
+    price = float(context.args[2])
+    products_db[code] = {"name": name, "price": price}
+    await update.message.reply_text(
+        f"🎉 تم إضافة المنتج الجديد `{code}` ({name}) بسعر **${price:.2f}**!"
+    )
+  except Exception:
+    await update.message.reply_text(
+        "⚠️ الاستخدام الخاطئ! الصيغة الصحيحة:\n`/addproduct VIP جواهر_فري_فاير"
+        " 10.0`",
+        parse_mode="Markdown",
+    )
+
+
+async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  if update.effective_user.id != ADMIN_CHAT_ID:
+    return
+  new_text = " ".join(context.args)
+  if new_text:
+    welcome_messages["ar"] = new_text
+    await update.message.reply_text("✅ تم تحديث رسالة الترحيب بنجاح!")
+  else:
+    await update.message.reply_text("⚠️ اكتب نص الترحيب الجديد بعد الأمر!")
+
+
+# --- 6. معالج الأزرار والقوائم ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   query = update.callback_query
   await query.answer()
@@ -179,18 +266,76 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if user_id not in user_balances:
     user_balances[user_id] = 0.0
 
-  lang = user_data.get(user_id, {}).get("lang", "ar")
+  user_data.setdefault(user_id, {})
+
+  # اختيار اللغة البدائي
+  if query.data.startswith("init_lang_"):
+    lang = query.data.split("_")[2]
+    user_data[user_id]["lang"] = lang
+    text, reply_markup = build_main_menu(lang, user_balances[user_id], user_id)
+    await query.edit_message_text(
+        text, parse_mode="Markdown", reply_markup=reply_markup
+    )
+    return
+
+  lang = user_data[user_id].get("lang", "ar")
 
   if query.data.startswith("lang_"):
     lang = query.data.split("_")[1]
-    user_data[user_id] = {"lang": lang}
-    text, reply_markup = build_main_menu(lang, user_balances[user_id])
+    user_data[user_id]["lang"] = lang
+    text, reply_markup = build_main_menu(lang, user_balances[user_id], user_id)
     await query.edit_message_text(
         text, parse_mode="Markdown", reply_markup=reply_markup
     )
 
+  elif query.data == "store":
+    keyboard = []
+    for code, item in products_db.items():
+      btn_text = f"📱 {item['name']} - ${item['price']:.2f}"
+      keyboard.append(
+          [InlineKeyboardButton(btn_text, callback_data=f"prod_{code}")]
+      )
+    keyboard.append([
+        InlineKeyboardButton("🔙 العودة للقائمة", callback_data="main_menu")
+    ])
+
+    await query.edit_message_text(
+        "🛍️ **اختر الخدمة أو المنتج المطلوبة:**",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+  elif query.data.startswith("prod_"):
+    code = query.data.split("_")[1]
+    item = products_db.get(code)
+    if not item:
+      await query.edit_message_text("❌ هاد المنتج غير متوفر حالياً.")
+      return
+
+    price = item["price"]
+    current_balance = user_balances[user_id]
+
+    if current_balance < price:
+      await query.edit_message_text(
+          f"❌ رصيدك غير كافٍ!\nرصيدك الحالي: **${current_balance:.2f}**\nسعر"
+          f" الخدمة: **${price:.2f}**",
+          parse_mode="Markdown",
+          reply_markup=InlineKeyboardMarkup([[
+              InlineKeyboardButton(
+                  "💳 إيداع رصيد الآن", callback_data="deposit"
+              )
+          ]]),
+      )
+    else:
+      user_data[user_id]["buying_product"] = code
+      user_data[user_id]["state"] = "WAITING_EMAIL"
+      await query.edit_message_text(
+          f"🛒 اخترت: **{item['name']}** بسعر **${price:.2f}**\n\n📧 أرسل بريدك"
+          " الإلكتروني الآن لتسليم طلبك:"
+      )
+
   elif query.data == "deposit":
-    user_data.setdefault(user_id, {})["state"] = "WAITING_TXID"
+    user_data[user_id]["state"] = "WAITING_TXID"
     msg = (
         "💳 **── قسم إيداع الرصيد ──**\n\n"
         f"• **Binance Pay ID:** `{BINANCE_PAY_ID}`\n"
@@ -211,8 +356,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif query.data == "profile":
     msg = (
         "👑 **── الحساب الشخصي ──**\n\n"
-        f"👤 المستخدم: @{user.username or user_id}\n"
-        f"🆔 ID: `{user_id}`\n"
+        f"👤 المستخدم: @{user.username or 'غير معرف'}\n"
+        f"🆔 ID الخاص بك: `{user_id}`\n"
         f"💰 الرصيد الحالي: **${user_balances[user_id]:.2f}**"
     )
     keyboard = [
@@ -225,58 +370,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
-  elif query.data == "store":
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "📱 تطبيقات APKMOD - $5", callback_data="prod_APKMOD"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🍎 تطبيقات IOS - $10", callback_data="prod_IOS"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "⚡ خدمات ROOT - $15", callback_data="prod_ROOT"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔙 العودة للقائمة", callback_data="main_menu"
-            )
-        ],
-    ]
-    await query.edit_message_text(
-        "🛍️ **اختر الخدمة المطلوبة:**",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-  elif query.data.startswith("prod_"):
-    product = query.data.split("_")[1]
-    price = PRODUCTS_PRICES.get(product, 0)
-    current_balance = user_balances[user_id]
-
-    if current_balance < price:
-      await query.edit_message_text(
-          f"❌ رصيدك غير كافٍ! رصيدك: **${current_balance:.2f}**، المطلوب:"
-          f" **${price:.2f}**.",
-          parse_mode="Markdown",
-          reply_markup=InlineKeyboardMarkup([[
-              InlineKeyboardButton(
-                  "💳 إيداع رصيد الآن", callback_data="deposit"
-              )
-          ]]),
-      )
-    else:
-      user_data.setdefault(user_id, {})["buying_product"] = product
-      user_data[user_id]["state"] = "WAITING_EMAIL"
-      await query.edit_message_text(
-          "📧 أرسل بريدك الإلكتروني الآن لتسلم الخدمة عليه:"
-      )
 
   elif query.data in [
       "my_orders",
@@ -309,13 +402,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
   elif query.data == "main_menu":
-    user_data.setdefault(user_id, {})["state"] = None
-    text, reply_markup = build_main_menu(lang, user_balances[user_id])
+    user_data[user_id]["state"] = None
+    text, reply_markup = build_main_menu(lang, user_balances[user_id], user_id)
     await query.edit_message_text(
         text, parse_mode="Markdown", reply_markup=reply_markup
     )
 
 
+# --- 7. معالجة الرسائل العادية والطلبات ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   user = update.effective_user
   user_id = user.id
@@ -346,8 +440,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         admin_msg = (
-            f"✅ **إيداع آلي جديد!**\n👤 العميل: @{user.username or user_id}\n💳"
-            f" المبلغ: ${amount}\n🔗 TxID: `{txid}`"
+            f"✅ **إيداع آلي جديد!**\n👤 العميل: @{user.username or user_id}\n🆔"
+            f" العميل: `{user_id}`\n💳 المبلغ: ${amount}\n🔗 TxID: `{txid}`"
         )
         await context.bot.send_message(
             ADMIN_CHAT_ID, admin_msg, parse_mode="Markdown"
@@ -366,20 +460,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   elif state == "WAITING_EMAIL":
     if "@" in text and "." in text:
       email = text
-      product = user_data[user_id].get("buying_product")
-      price = PRODUCTS_PRICES.get(product, 0)
+      code = user_data[user_id].get("buying_product")
+      item = products_db.get(code, {})
+      price = item.get("price", 0)
 
       user_balances[user_id] -= price
       user_data[user_id]["state"] = None
 
       await update.message.reply_text(
           f"✅ تم خصم **${price:.2f}** من رصيدك بنجاح.\nالخدمة:"
-          f" {product}\nالإيميل: `{email}`\nسيتم التسليم قريباً!"
+          f" {item.get('name')}\nالإيميل: `{email}`\nسيتم التسليم قريباً!"
       )
 
       admin_msg = (
-          f"📦 **طلب جديد!**\n👤 العميل: @{user.username or user_id}\n🛒"
-          f" الخدمة: {product}\n📧 الإيميل للنسخ: `{email}`"
+          f"📦 **طلب جديد!**\n👤 العميل: @{user.username or user_id}\n🆔 العميل:"
+          f" `{user_id}`\n🛒 الخدمة: {item.get('name')}\n📧 الإيميل للنسخ:"
+          f" `{email}`"
       )
       await context.bot.send_message(
           ADMIN_CHAT_ID, admin_msg, parse_mode="Markdown"
@@ -388,10 +484,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
       await update.message.reply_text("⚠️ البريد الإلكتروني غير صحيح!")
 
 
-# --- 5. تشغيل التطبيق ---
+# --- 8. تشغيل التطبيق واضافة الهاندلرز ---
 if __name__ == "__main__":
   app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+  # أوامر المستخدم والآدمن
   app.add_handler(CommandHandler("start", start))
+  app.add_handler(CommandHandler("admin", admin_panel))
+  app.add_handler(CommandHandler("setprice", set_price))
+  app.add_handler(CommandHandler("addproduct", add_product))
+  app.add_handler(CommandHandler("setwelcome", set_welcome))
+
+  # التفاعلات والرسائل
   app.add_handler(CallbackQueryHandler(button_handler))
   app.add_handler(
       MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
